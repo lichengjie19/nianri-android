@@ -1,0 +1,13 @@
+.DS_Store
+.gradle/
+.gradle-dist/
+.android-sdk/
+local.properties
+**/build/
+*.iml
+.idea/
+commandlinetools-*.zip
+gradle-*-bin.zip
+/lunar-*.jar
+*.apk
+!念日-v1.0.9.apk

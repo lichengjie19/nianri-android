@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">念日</string>
+    <string name="reminder_choice_checked">✓  %1$s</string>
+    <string name="reminder_choice_unchecked">%1$s</string>
+</resources>
