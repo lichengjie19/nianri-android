@@ -21,10 +21,13 @@ public final class EventStore {
     private static final String KEY_DELETED_EVENTS = "deleted_events_json";
     private static final String KEY_SEEDED = "demo_seeded";
 
+    private final Context context;
     private final SharedPreferences preferences;
 
     public EventStore(Context context) {
-        preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        Context appContext = context.getApplicationContext();
+        this.context = appContext == null ? context : appContext;
+        preferences = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     public synchronized List<DateEvent> load() {
@@ -69,6 +72,12 @@ public final class EventStore {
             preferences.edit().putString(key, array.toString()).apply();
         } catch (Exception error) {
             Log.e(TAG, "Unable to save dates", error);
+            return;
+        }
+        try {
+            DateWidgetProvider.refreshAll(context);
+        } catch (RuntimeException error) {
+            Log.w(TAG, "Unable to refresh date widgets", error);
         }
     }
 
