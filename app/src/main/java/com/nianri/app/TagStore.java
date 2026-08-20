@@ -19,7 +19,7 @@ public final class TagStore {
     private static final String LOG_TAG = "TagStore";
     private static final String PREFS = "nianri_tags";
     private static final String KEY_TAGS = "tags_json";
-    private static final int MAX_TAGS = 20;
+    static final int MAX_TAGS = 20;
 
     public static final class Tag {
         public final String id;
@@ -220,6 +220,22 @@ public final class TagStore {
         } catch (Exception error) {
             Log.e(LOG_TAG, "Unable to save tags", error);
         }
+    }
+
+    synchronized void saveForMigration(List<Tag> tags) {
+        if (tags == null || tags.isEmpty() || tags.size() > MAX_TAGS) {
+            throw new IllegalArgumentException("迁移标签数量无效");
+        }
+        List<Tag> safe = new ArrayList<>();
+        for (Tag tag : tags) {
+            if (tag == null || tag.id == null || tag.id.trim().isEmpty()
+                    || tag.name == null || tag.name.trim().isEmpty()
+                    || findById(safe, tag.id) != null) {
+                throw new IllegalArgumentException("迁移标签格式无效");
+            }
+            safe.add(new Tag(tag.id, tag.name, tag.style));
+        }
+        save(safe);
     }
 
     private static Tag findById(List<Tag> tags, String id) {

@@ -6,8 +6,14 @@ local.properties
 **/build/
 *.iml
 .idea/
+captures/
+.externalNativeBuild/
+.cxx/
 commandlinetools-*.zip
 gradle-*-bin.zip
 /lunar-*.jar
 *.apk
-!念日-v1.0.9.apk
+*.jks
+*.keystore
+key.properties
+signing.properties

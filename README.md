@@ -1,6 +1,13 @@
 # 念日
 
+[![Android CI](https://github.com/lichengjie19/nianri-android/actions/workflows/android-ci.yml/badge.svg)](https://github.com/lichengjie19/nianri-android/actions/workflows/android-ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/lichengjie19/nianri-android)](https://github.com/lichengjie19/nianri-android/releases/latest)
+
 一个轻量的 Android 重要日期提醒应用。当前版本为 `1.0.9`，支持 Android 8.0（API 26）及以上。
+
+## 下载
+
+最新安装包见 [GitHub Releases](https://github.com/lichengjie19/nianri-android/releases/latest)。当前 APK 使用 Android 调试签名，适合测试安装，不用于正式应用商店发布。
 
 ## 已实现
 
@@ -42,6 +49,9 @@
 - 单条日期可通过系统日历界面添加，无需应用直接写入
 - 在首页批量选择多个日期，选择目标日历后一次性写入，自动跳过同名同时间事件
 - 批量日期和目标日历均使用与首页一致的卡片式选择界面
+- 支持新旧手机面对面迁移：新手机生成一次性二维码，旧手机扫码后通过同一 Wi-Fi 或热点加密直传
+- 换机数据包含日期、历法、提醒参数、备注、自定义标签及可选回收站；新手机可合并去重或确认后完全替换
+- 换机二维码 5 分钟自动失效，连接使用一次性密钥和 AES-GCM 完整性校验，日期数据不经过服务器
 - 可选联网检查国家标准全文公开系统和紫金山天文台资料是否可访问
 - 日期数据只保存在应用本地，不需要账号，不依赖服务器
 
@@ -63,7 +73,8 @@
 - `RECEIVE_BOOT_COMPLETED`：开机后恢复提醒。
 - `READ_CALENDAR`：用于用户主动从本机日历导入，或在批量添加时选择目标日历及去重。
 - `WRITE_CALENDAR`：仅用于用户主动执行批量添加到本机日历。
-- `INTERNET`：仅用于用户开启或手动执行权威来源检查。
+- `CAMERA`：仅在旧手机主动扫描换机二维码时使用；画面不保存、不上传。
+- `INTERNET`：用于两台手机间的局域网直传，以及用户主动执行权威来源检查。
 
 ## 构建
 
@@ -82,3 +93,7 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home
 ```
 
 调试 APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。
+
+## 参与贡献
+
+请从功能或修复分支提交 Pull Request，具体见 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私密报告，不要在公开 Issue 中披露。

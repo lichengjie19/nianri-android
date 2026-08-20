@@ -97,7 +97,7 @@ public final class SettingsDialog {
         LinearLayout data = categoryRow(
                 "农",
                 "农历与数据",
-                "离线范围、来源校验与自动检查",
+                "换机迁移、离线范围与来源校验",
                 true
         );
         data.setOnClickListener(view -> renderDataSettings());
@@ -273,6 +273,15 @@ public final class SettingsDialog {
 
     private void renderDataSettings() {
         LinearLayout body = startPage("农历与数据", true);
+        addSectionTitle(body, "新旧手机迁移");
+        addInfoCard(
+                body,
+                "面对面加密直传",
+                "两台手机连接同一 Wi-Fi 或热点后扫码迁移。日期不会经过服务器，接收时可自动去重。"
+        );
+        TextView transfer = actionButton("开始换机迁移", Color.WHITE, Ui.ACCENT);
+        body.addView(transfer, matchHeight(48, 9));
+
         addSectionTitle(body, "离线农历");
         addInfoCard(
                 body,
@@ -305,6 +314,11 @@ public final class SettingsDialog {
         body.addView(standardLink, matchHeight(44, 8));
         body.addView(observatoryLink, matchHeight(44, 6));
 
+        transfer.setOnClickListener(view -> {
+            dialog.dismiss();
+            activity.startActivity(new Intent(activity, TransferActivity.class));
+        });
+
         autoCheck.setOnCheckedChangeListener((button, checked) -> preferences.edit()
                 .putBoolean("auto_authority_check", checked)
                 .apply());
@@ -335,13 +349,13 @@ public final class SettingsDialog {
 
         addSectionTitle(body, "数据与隐私");
         TextView privacy = infoText(
-                "日期、标签和回收站数据均保存在本机，不需要账号，也不会上传到服务器。联网功能目前只检查官方来源是否可访问。"
+                "日期、标签和回收站数据均保存在本机，不需要账号，也不会上传到服务器。换机迁移只在两台手机之间端到端加密直传。"
         );
         body.addView(privacy, matchWrap(0));
 
         addSectionTitle(body, "权限用途");
         TextView permissions = infoText(
-                "通知与准点权限用于按时提醒；日历权限只在导入或批量写入时使用；网络权限只用于权威来源检查。"
+                "通知与准点权限用于按时提醒；日历权限只在导入或批量写入时使用；相机用于扫描换机二维码；网络用于局域网迁移与权威来源检查。"
         );
         body.addView(permissions, matchWrap(0));
     }
