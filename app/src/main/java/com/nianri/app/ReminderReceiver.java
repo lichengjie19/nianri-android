@@ -14,6 +14,7 @@ import java.time.temporal.ChronoUnit;
 public final class ReminderReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
+        DateWidgetProvider.refreshAll(context);
         boolean diagnosticTest = intent.getBooleanExtra(
                 ReminderScheduler.EXTRA_DIAGNOSTIC_TEST,
                 false

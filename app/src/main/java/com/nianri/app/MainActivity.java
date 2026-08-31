@@ -97,6 +97,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        DateWidgetProvider.refreshAll(this);
         if (activeList != null) {
             rebuildFilterButtons();
             ReminderScheduler.deliverDueRemindersNow(this);
