@@ -1,5 +1,6 @@
 package com.nianri.app;
 
+import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
@@ -14,17 +15,34 @@ import android.view.View;
 import android.widget.RemoteViews;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 public final class DateWidgetProvider extends AppWidgetProvider {
     private static final String PREFS = "nianri_date_widgets";
     private static final String KEY_EVENT_PREFIX = "event_id_";
+    private static final String ACTION_REFRESH_FOR_NEW_DAY =
+            "com.nianri.app.action.REFRESH_DATE_WIDGETS_FOR_NEW_DAY";
+    private static final int REFRESH_REQUEST_CODE = 0x4e525744;
 
     @Override
     public void onUpdate(Context context, AppWidgetManager manager, int[] appWidgetIds) {
         for (int appWidgetId : appWidgetIds) {
             update(context, manager, appWidgetId);
         }
+        scheduleNextDayRefresh(context);
+    }
+
+    @Override
+    public void onEnabled(Context context) {
+        super.onEnabled(context);
+        scheduleNextDayRefresh(context);
+    }
+
+    @Override
+    public void onDisabled(Context context) {
+        cancelNextDayRefresh(context);
+        super.onDisabled(context);
     }
 
     @Override
@@ -53,7 +71,8 @@ public final class DateWidgetProvider extends AppWidgetProvider {
         if (Intent.ACTION_DATE_CHANGED.equals(action)
                 || Intent.ACTION_TIME_CHANGED.equals(action)
                 || Intent.ACTION_TIMEZONE_CHANGED.equals(action)
-                || Intent.ACTION_LOCALE_CHANGED.equals(action)) {
+                || Intent.ACTION_LOCALE_CHANGED.equals(action)
+                || ACTION_REFRESH_FOR_NEW_DAY.equals(action)) {
             refreshAll(context);
         }
     }
@@ -168,6 +187,61 @@ public final class DateWidgetProvider extends AppWidgetProvider {
         for (int appWidgetId : appWidgetIds) {
             update(appContext, manager, appWidgetId);
         }
+        if (appWidgetIds.length == 0) {
+            cancelNextDayRefresh(appContext);
+        } else {
+            scheduleNextDayRefresh(appContext);
+        }
+    }
+
+    private static void scheduleNextDayRefresh(Context context) {
+        Context appContext = context.getApplicationContext();
+        if (activeWidgetIds(appContext).length == 0) {
+            cancelNextDayRefresh(appContext);
+            return;
+        }
+        AlarmManager manager = appContext.getSystemService(AlarmManager.class);
+        PendingIntent pendingIntent = refreshPendingIntent(
+                appContext,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        long triggerAt = DateWidgetRefreshSchedule.nextTriggerAtMillis(
+                System.currentTimeMillis(),
+                ZoneId.systemDefault()
+        );
+        if (ReminderScheduler.canScheduleExactAlarms(appContext)) {
+            try {
+                manager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        pendingIntent
+                );
+                return;
+            } catch (SecurityException ignored) {
+                // Permission can be revoked between the capability check and this call.
+            }
+        }
+        manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent);
+    }
+
+    private static void cancelNextDayRefresh(Context context) {
+        Context appContext = context.getApplicationContext();
+        PendingIntent pendingIntent = refreshPendingIntent(
+                appContext,
+                PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE
+        );
+        if (pendingIntent == null) {
+            return;
+        }
+        AlarmManager manager = appContext.getSystemService(AlarmManager.class);
+        manager.cancel(pendingIntent);
+        pendingIntent.cancel();
+    }
+
+    private static PendingIntent refreshPendingIntent(Context context, int flags) {
+        Intent intent = new Intent(context, DateWidgetProvider.class)
+                .setAction(ACTION_REFRESH_FOR_NEW_DAY);
+        return PendingIntent.getBroadcast(context, REFRESH_REQUEST_CODE, intent, flags);
     }
 
     private static PendingIntent openPendingIntent(

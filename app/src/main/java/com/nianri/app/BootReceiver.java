@@ -17,5 +17,6 @@ public final class BootReceiver extends BroadcastReceiver {
             return;
         }
         ReminderScheduler.scheduleAll(context);
+        DateWidgetProvider.refreshAll(context);
     }
 }
