@@ -5,6 +5,8 @@
 
 一个轻量的 Android 重要日期提醒应用。当前版本为 `1.1.2`，支持 Android 8.0（API 26）及以上。
 
+> 备注：本项目全程依赖 Codex 实现。
+
 ## 下载
 
 最新安装包见 [GitHub Releases](https://github.com/lichengjie19/nianri-android/releases/latest)。当前 APK 使用 Android 调试签名，适合测试安装，不用于正式应用商店发布。
