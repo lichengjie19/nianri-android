@@ -3,7 +3,7 @@
 [![Android CI](https://github.com/lichengjie19/nianri-android/actions/workflows/android-ci.yml/badge.svg)](https://github.com/lichengjie19/nianri-android/actions/workflows/android-ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/lichengjie19/nianri-android)](https://github.com/lichengjie19/nianri-android/releases/latest)
 
-一个轻量的 Android 重要日期提醒应用。当前版本为 `1.1.2`，支持 Android 8.0（API 26）及以上。
+一个轻量的 Android 重要日期提醒应用。当前版本为 `1.1.3`，支持 Android 8.0（API 26）及以上。
 
 > 备注：本项目全程依赖 Codex 实现。
 
@@ -26,7 +26,7 @@ flowchart LR
     F -->|"单次结束"| G["已结束"]
     G --> H["回收站"]
     H -->|"恢复"| C
-    C --> I["单条 / 批量写入日历"]
+    C --> I["多选 / 一键同步到本机日历，已存在则跳过"]
     J["新手机生成二维码"] --> K["旧手机扫码"]
     K --> L["AES-GCM 局域网直传"]
 ```
@@ -34,6 +34,14 @@ flowchart LR
 日期只保存在本机；农历支持 1900—2100 年离线换算，换机无需账号或服务器。
 
 首次安装会加入四条演示日期，便于查看滚动排序与已结束区域；均可编辑或删除。
+
+## 同步到本机日历
+
+- 首页点击“同步”（设置中也有入口），勾选日期后点“同步所选”，或直接点“一键同步全部”。全部包括已结束日期，不包括回收站；无法解析的日期需修正后再同步。
+- 首次使用需授予日历读写权限；手机有多个可写日历时，选择目标日历后开始同步。选择账户日历后，系统可能随账户同步。
+- 目标日历中已有相同标题、同一公历日期的有效日程时自动跳过，包括全天和年度重复日程；不覆盖原有日程，也不会删除日历内容。
+- 完成后显示新增、已存在跳过、失败数量；失败可重试，已成功写入的日程会跳过。
+- 公历年度日期写为每年重复；农历年度日期仅写入下一次对应的公历日期，之后的年度提醒仍由念日管理。
 
 ## 数据来源与边界
 
@@ -49,8 +57,8 @@ flowchart LR
 - `VIBRATE`：允许重要日期通知按通知频道设置震动。
 - `FOREGROUND_SERVICE`：仅在提醒到点时启动短时送达服务，提交通知后立即停止。
 - `RECEIVE_BOOT_COMPLETED`：开机后恢复提醒。
-- `READ_CALENDAR`：用于用户主动从本机日历导入，或在批量添加时选择目标日历及去重。
-- `WRITE_CALENDAR`：仅用于用户主动执行批量添加到本机日历。
+- `READ_CALENDAR`：用于用户主动从本机日历导入，或在同步时选择目标日历及去重。
+- `WRITE_CALENDAR`：仅用于用户主动将所选或全部日期同步到本机日历。
 - `CAMERA`：仅在旧手机主动扫描换机二维码时使用；画面不保存、不上传。
 - `INTERNET`：用于两台手机间的局域网直传，以及用户主动执行权威来源检查。
 
@@ -70,7 +78,7 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home
 ./gradlew :app:testDebugUnitTest :app:lintDebug
 ```
 
-调试 APK 输出到 `app/build/outputs/apk/debug/念日-v1.1.2.apk`。
+调试 APK 输出到 `app/build/outputs/apk/debug/念日-v1.1.3.apk`。
 
 ## 参与贡献
 

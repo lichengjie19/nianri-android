@@ -255,11 +255,13 @@ public final class SettingsDialog {
 
         addSectionTitle(body, "本机日历");
         TextView calendarInfo = infoText(
-                "导入时只读取本机日历；首页“批量”功能用于把多个日期写入指定日历。所有事件只在手机本地处理。"
+                "首页“同步”支持多选或一键同步全部日期；目标日历中标题和日期相同的日程会自动跳过。选择账户日历后，系统可能随账户同步。"
         );
         body.addView(calendarInfo, matchWrap(0));
         TextView importButton = actionButton("从本机日历导入", Ui.TEXT, Ui.SURFACE);
         body.addView(importButton, matchHeight(48, 9));
+        TextView syncButton = actionButton("同步到本机日历", Ui.TEXT, Ui.SURFACE);
+        body.addView(syncButton, matchHeight(48, 9));
 
         manageTags.setOnClickListener(view -> {
             dialog.dismiss();
@@ -268,6 +270,10 @@ public final class SettingsDialog {
         importButton.setOnClickListener(view -> {
             dialog.dismiss();
             activity.requestCalendarImport();
+        });
+        syncButton.setOnClickListener(view -> {
+            dialog.dismiss();
+            activity.showCalendarExportPicker();
         });
     }
 

@@ -39,12 +39,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class MainActivity extends Activity {
     private static final String FILTER_ALL = "__all__";
     private static final int REQUEST_NOTIFICATIONS = 1001;
     private static final int REQUEST_CALENDAR = 1002;
     private static final int REQUEST_CALENDAR_EXPORT = 1003;
+    private static final String STATE_CALENDAR_EXPORT_IDS = "calendar_export_ids";
+    private static final String STATE_CALENDAR_TARGET_OPEN = "calendar_target_open";
+    private static final AtomicBoolean calendarExportRunning = new AtomicBoolean();
 
     private EventStore store;
     private TagStore tagStore;
@@ -62,6 +66,7 @@ public final class MainActivity extends Activity {
     private String currentFilter = FILTER_ALL;
     private final Map<String, TextView> filterButtons = new HashMap<>();
     private final List<DateEvent> pendingCalendarExports = new ArrayList<>();
+    private Dialog calendarTargetDialog;
     private final Handler minuteHandler = new Handler(Looper.getMainLooper());
     private final Runnable minuteRefresh = new Runnable() {
         @Override
@@ -83,6 +88,7 @@ public final class MainActivity extends Activity {
         store = new EventStore(this);
         tagStore = new TagStore(this);
         store.seedDemoDatesIfNeeded();
+        restorePendingCalendarExports(savedInstanceState);
         setContentView(buildHome());
         registerPredictiveBackIfSupported();
         renderEvents();
@@ -92,6 +98,9 @@ public final class MainActivity extends Activity {
             getWindow().getDecorView().post(this::maybeRequestExactAlarmPermissionIfNeeded);
         }
         maybeAutoCheckAuthoritySources();
+        if (savedInstanceState != null && savedInstanceState.getBoolean(STATE_CALENDAR_TARGET_OPEN)) {
+            getWindow().getDecorView().post(() -> showWritableCalendarPicker(true));
+        }
     }
 
     @Override
@@ -112,6 +121,33 @@ public final class MainActivity extends Activity {
     protected void onPause() {
         minuteHandler.removeCallbacks(minuteRefresh);
         super.onPause();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        long[] ids = new long[pendingCalendarExports.size()];
+        for (int i = 0; i < ids.length; i++) {
+            ids[i] = pendingCalendarExports.get(i).id;
+        }
+        outState.putLongArray(STATE_CALENDAR_EXPORT_IDS, ids);
+        outState.putBoolean(STATE_CALENDAR_TARGET_OPEN,
+                calendarTargetDialog != null && calendarTargetDialog.isShowing());
+        super.onSaveInstanceState(outState);
+    }
+
+    private void restorePendingCalendarExports(Bundle savedInstanceState) {
+        if (savedInstanceState == null) return;
+        long[] ids = savedInstanceState.getLongArray(STATE_CALENDAR_EXPORT_IDS);
+        if (ids == null || ids.length == 0) return;
+        List<DateEvent> events = store.load();
+        for (long id : ids) {
+            for (DateEvent event : events) {
+                if (event.id == id) {
+                    pendingCalendarExports.add(event.copy());
+                    break;
+                }
+            }
+        }
     }
 
     private void scheduleMinuteRefresh() {
@@ -199,8 +235,8 @@ public final class MainActivity extends Activity {
         subtitleParams.topMargin = Ui.dp(this, 6);
         titles.addView(subtitle, subtitleParams);
         header.addView(titles, Ui.weightedParams(ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        TextView batch = Ui.button(this, "批量", Ui.TEXT, Color.rgb(236, 234, 228), 14);
-        batch.setContentDescription("批量添加到本机日历");
+        TextView batch = Ui.button(this, "同步", Ui.TEXT, Color.rgb(236, 234, 228), 14);
+        batch.setContentDescription("多选或一键同步到本机日历");
         batch.setOnClickListener(view -> showCalendarExportPicker());
         LinearLayout.LayoutParams batchParams = Ui.linearParams(Ui.dp(this, 58), Ui.dp(this, 40));
         batchParams.rightMargin = Ui.dp(this, 8);
@@ -1090,7 +1126,11 @@ public final class MainActivity extends Activity {
         requestPermissions(new String[]{Manifest.permission.READ_CALENDAR}, REQUEST_CALENDAR);
     }
 
-    private void showCalendarExportPicker() {
+    public void showCalendarExportPicker() {
+        if (calendarExportRunning.get()) {
+            Toast.makeText(this, "正在同步，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
         LocalDate today = LocalDate.now();
         List<EventWithOccurrence> candidates = new ArrayList<>();
         for (DateEvent event : store.load()) {
@@ -1107,7 +1147,7 @@ public final class MainActivity extends Activity {
             return Long.compare(left.occurrence.daysFromToday, right.occurrence.daysFromToday);
         });
         if (candidates.isEmpty()) {
-            Toast.makeText(this, "还没有可添加的日期", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "还没有可同步的日期", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -1117,7 +1157,7 @@ public final class MainActivity extends Activity {
         LinearLayout panel = dialogPanel();
 
         LinearLayout heading = Ui.horizontal(this);
-        TextView title = Ui.text(this, "批量添加到日历", 20, Ui.TEXT, true);
+        TextView title = Ui.text(this, "同步到本机日历", 20, Ui.TEXT, true);
         heading.addView(title, Ui.weightedParams(ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         TextView selectAll = Ui.button(this, "全选", Ui.ACCENT, Color.rgb(252, 239, 236), 999);
         selectAll.setTextSize(12);
@@ -1127,13 +1167,19 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT
         ));
 
-        TextView selectionStatus = Ui.text(this, "选择要复制到本机日历的日期", 12, Ui.MUTED, false);
+        TextView hint = Ui.text(this,
+                "可多选或同步全部；目标日历中标题和日期相同的日程会自动跳过。", 12, Ui.MUTED, false);
         LinearLayout.LayoutParams statusParams = Ui.linearParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
         statusParams.topMargin = Ui.dp(this, 7);
-        panel.addView(selectionStatus, statusParams);
+        panel.addView(hint, statusParams);
+        TextView selectionStatus = Ui.text(this, "", 12, Ui.MUTED, false);
+        LinearLayout.LayoutParams selectionParams = Ui.linearParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        selectionParams.topMargin = Ui.dp(this, 8);
+        panel.addView(selectionStatus, selectionParams);
 
         ScrollView listScroll = new ScrollView(this);
         listScroll.setFillViewport(false);
@@ -1156,7 +1202,8 @@ public final class MainActivity extends Activity {
             choices.addView(rows[i], rowParams);
         }
         int listHeight = Math.min(
-                Ui.dp(this, 390),
+                Math.max(Ui.dp(this, 86), Math.min(Ui.dp(this, 330),
+                        getResources().getDisplayMetrics().heightPixels - Ui.dp(this, 350))),
                 Math.max(Ui.dp(this, 86), candidates.size() * Ui.dp(this, 85))
         );
         LinearLayout.LayoutParams scrollParams = Ui.linearParams(
@@ -1166,9 +1213,16 @@ public final class MainActivity extends Activity {
         scrollParams.topMargin = Ui.dp(this, 18);
         panel.addView(listScroll, scrollParams);
 
+        TextView syncAll = Ui.button(this, "一键同步全部（" + candidates.size() + "）",
+                Ui.ACCENT, Color.rgb(252, 239, 236), 15);
+        LinearLayout.LayoutParams syncAllParams = Ui.linearParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 48));
+        syncAllParams.topMargin = Ui.dp(this, 8);
+        panel.addView(syncAll, syncAllParams);
+
         LinearLayout actions = Ui.horizontal(this);
         TextView cancel = Ui.button(this, "取消", Ui.TEXT, Color.rgb(239, 237, 231), 15);
-        TextView next = Ui.button(this, "下一步", Ui.MUTED, Color.rgb(239, 237, 231), 15);
+        TextView next = Ui.button(this, "同步所选", Ui.MUTED, Color.rgb(239, 237, 231), 15);
         actions.addView(cancel, Ui.weightedParams(Ui.dp(this, 48), 1));
         LinearLayout.LayoutParams nextParams = Ui.weightedParams(Ui.dp(this, 48), 1.35f);
         nextParams.leftMargin = Ui.dp(this, 10);
@@ -1188,11 +1242,11 @@ public final class MainActivity extends Activity {
             }
             boolean hasSelection = count > 0;
             selectionStatus.setText(hasSelection
-                    ? "已选 " + count + " 个日期 · 将在下一步选择目标日历"
-                    : "选择要复制到本机日历的日期");
+                    ? "已选 " + count + " / " + candidates.size() + " 个日期"
+                    : "共 " + candidates.size() + " 个日期 · 尚未选择");
             selectAll.setText(count == selected.length ? "清除" : "全选");
             next.setEnabled(hasSelection);
-            next.setText(hasSelection ? "下一步  " + count : "下一步");
+            next.setText(hasSelection ? "同步所选（" + count + "）" : "同步所选");
             next.setTextColor(hasSelection ? Color.WHITE : Ui.MUTED);
             next.setBackground(Ui.ripple(
                     this,
@@ -1218,6 +1272,14 @@ public final class MainActivity extends Activity {
             refreshSelection.run();
         });
         cancel.setOnClickListener(view -> dialog.cancel());
+        syncAll.setOnClickListener(view -> {
+            pendingCalendarExports.clear();
+            for (EventWithOccurrence candidate : candidates) {
+                pendingCalendarExports.add(candidate.event.copy());
+            }
+            dialog.dismiss();
+            requestCalendarExportPermission();
+        });
         next.setOnClickListener(view -> {
             pendingCalendarExports.clear();
             for (int i = 0; i < candidates.size(); i++) {
@@ -1231,7 +1293,15 @@ public final class MainActivity extends Activity {
             }
         });
         refreshSelection.run();
-        showStyledDialog(dialog, panel);
+        showScrollableCalendarDialog(dialog, panel);
+    }
+
+    private void showScrollableCalendarDialog(Dialog dialog, View panel) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.addView(panel, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        showStyledDialog(dialog, scroll);
     }
 
     private LinearLayout dialogPanel() {
@@ -1399,6 +1469,7 @@ public final class MainActivity extends Activity {
     }
 
     private void requestCalendarExportPermission() {
+        if (pendingCalendarExports.isEmpty()) return;
         boolean canRead = checkSelfPermission(Manifest.permission.READ_CALENDAR)
                 == PackageManager.PERMISSION_GRANTED;
         boolean canWrite = checkSelfPermission(Manifest.permission.WRITE_CALENDAR)
@@ -1414,6 +1485,12 @@ public final class MainActivity extends Activity {
     }
 
     private void showWritableCalendarPicker() {
+        showWritableCalendarPicker(false);
+    }
+
+    private void showWritableCalendarPicker(boolean confirmTarget) {
+        if (pendingCalendarExports.isEmpty() || isFinishing() || isDestroyed()) return;
+        if (calendarTargetDialog != null && calendarTargetDialog.isShowing()) return;
         List<CalendarExporter.CalendarTarget> calendars;
         try {
             calendars = CalendarExporter.listWritableCalendars(this);
@@ -1427,11 +1504,13 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, "未找到可写日历，请先在系统日历中添加账户", Toast.LENGTH_LONG).show();
             return;
         }
-        if (calendars.size() == 1) {
+        if (calendars.size() == 1 && !confirmTarget) {
             exportSelectedDates(calendars.get(0));
             return;
         }
         Dialog dialog = new Dialog(this);
+        calendarTargetDialog = dialog;
+        dialog.setOnDismissListener(ignored -> calendarTargetDialog = null);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout panel = dialogPanel();
         TextView title = Ui.text(this, "选择目标日历", 20, Ui.TEXT, true);
@@ -1441,7 +1520,7 @@ public final class MainActivity extends Activity {
         ));
         TextView subtitle = Ui.text(
                 this,
-                "已选 " + pendingCalendarExports.size() + " 个日期 · 点击下方日历即可添加",
+                "待同步 " + pendingCalendarExports.size() + " 个日期 · 点击目标日历开始，已存在则跳过",
                 12,
                 Ui.MUTED,
                 false
@@ -1493,35 +1572,68 @@ public final class MainActivity extends Activity {
         cancelParams.topMargin = Ui.dp(this, 8);
         panel.addView(cancel, cancelParams);
         dialog.setOnCancelListener(ignored -> pendingCalendarExports.clear());
-        showStyledDialog(dialog, panel);
+        showScrollableCalendarDialog(dialog, panel);
     }
 
     private void exportSelectedDates(CalendarExporter.CalendarTarget target) {
+        if (pendingCalendarExports.isEmpty()) return;
+        if (!calendarExportRunning.compareAndSet(false, true)) {
+            pendingCalendarExports.clear();
+            Toast.makeText(this, "正在同步，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
         List<DateEvent> selected = new ArrayList<>(pendingCalendarExports);
         pendingCalendarExports.clear();
-        Toast.makeText(this, "正在添加到“" + calendarDisplayName(target) + "”…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "正在同步到“" + calendarDisplayName(target) + "”…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            CalendarExporter.ExportResult result = CalendarExporter.export(this, target, selected);
-            runOnUiThread(() -> Toast.makeText(
-                    this,
-                    calendarExportMessage(result),
-                    Toast.LENGTH_LONG
-            ).show());
+            CalendarExporter.ExportResult result;
+            try {
+                result = CalendarExporter.export(getApplicationContext(), target, selected);
+            } catch (RuntimeException error) {
+                result = new CalendarExporter.ExportResult();
+                result.failed = selected.size();
+            } finally {
+                calendarExportRunning.set(false);
+            }
+            CalendarExporter.ExportResult completed = result;
+            runOnUiThread(() -> showCalendarExportResult(target, completed));
         }, "nianri-calendar-export").start();
     }
 
+    private void showCalendarExportResult(
+            CalendarExporter.CalendarTarget target, CalendarExporter.ExportResult result) {
+        String message = "目标日历：" + calendarDisplayName(target) + "\n\n" + calendarExportMessage(result);
+        if (isFinishing() || isDestroyed()) {
+            Toast.makeText(getApplicationContext(), "同步结果：新增 " + result.added
+                    + "，跳过 " + result.duplicates + "，失败 " + result.failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout panel = dialogPanel();
+        String title = result.failed == 0 ? "同步完成"
+                : result.added + result.duplicates == 0 ? "同步未完成" : "部分日期未同步";
+        panel.addView(Ui.text(this, title, 20, Ui.TEXT, true));
+        TextView detail = Ui.text(this, message, 14, Ui.MUTED, false);
+        LinearLayout.LayoutParams detailParams = Ui.linearParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        detailParams.topMargin = Ui.dp(this, 16);
+        panel.addView(detail, detailParams);
+        TextView done = Ui.button(this, "完成", Color.WHITE, Ui.ACCENT, 15);
+        done.setOnClickListener(view -> dialog.dismiss());
+        LinearLayout.LayoutParams doneParams = Ui.linearParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 48));
+        doneParams.topMargin = Ui.dp(this, 20);
+        panel.addView(done, doneParams);
+        showScrollableCalendarDialog(dialog, panel);
+    }
+
     private String calendarExportMessage(CalendarExporter.ExportResult result) {
-        StringBuilder message = new StringBuilder();
-        if (result.added > 0) {
-            message.append("已添加 ").append(result.added).append(" 个日期");
-        } else {
-            message.append("没有新增日期");
-        }
-        if (result.duplicates > 0) {
-            message.append("，已跳过 ").append(result.duplicates).append(" 个重复事件");
-        }
+        StringBuilder message = new StringBuilder("新增 ").append(result.added).append(" 个日期")
+                .append("\n已存在，跳过 ").append(result.duplicates).append(" 个日期")
+                .append("\n失败 ").append(result.failed).append(" 个日期");
         if (result.failed > 0) {
-            message.append("，").append(result.failed).append(" 个添加失败");
+            message.append("\n可重新同步；已成功的日期会自动跳过。");
         }
         if (result.recurringLunar > 0) {
             message.append("\n农历重复日期已写入下一次公历日期，年度提醒仍由念日管理。");
@@ -1547,7 +1659,7 @@ public final class MainActivity extends Activity {
                 showWritableCalendarPicker();
             } else {
                 pendingCalendarExports.clear();
-                Toast.makeText(this, "需要日历读写权限才能批量添加", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "需要日历读写权限才能同步并跳过已存在的日程", Toast.LENGTH_LONG).show();
             }
         } else if (requestCode == REQUEST_NOTIFICATIONS) {
             ReminderScheduler.scheduleAll(this);
