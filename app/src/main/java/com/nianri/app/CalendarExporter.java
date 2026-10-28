@@ -3,17 +3,21 @@ package com.nianri.app;
 import android.annotation.SuppressLint;
 import android.content.ContentProviderOperation;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.OperationApplicationException;
 import android.database.Cursor;
+import android.net.Uri;
 import android.os.RemoteException;
 import android.provider.CalendarContract;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class CalendarExporter {
     private CalendarExporter() {
@@ -63,7 +67,7 @@ public final class CalendarExporter {
                 CalendarContract.Calendars.CALENDAR_DISPLAY_NAME + " COLLATE NOCASE ASC"
         )) {
             if (cursor == null) {
-                return result;
+                throw new IllegalStateException("无法读取本机日历");
             }
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(0);
@@ -76,7 +80,7 @@ public final class CalendarExporter {
     }
 
     @SuppressLint("MissingPermission")
-    public static ExportResult export(
+    public static synchronized ExportResult export(
             Context context,
             CalendarTarget target,
             List<DateEvent> events
@@ -85,16 +89,20 @@ public final class CalendarExporter {
         ContentResolver resolver = context.getContentResolver();
         LocalDate today = LocalDate.now();
         ZoneId zone = ZoneId.systemDefault();
+        // Also cover duplicate selections before the provider refreshes its instance cache.
+        Set<CalendarEventKey> existing = new HashSet<>();
         for (DateEvent event : events) {
             try {
                 Occurrence occurrence = DateCalculator.occurrence(event, today);
+                CalendarEventKey key = new CalendarEventKey(target.id, event.title, occurrence.solarDate);
                 long start = ReminderTime.at(occurrence.solarDate, event.reminderHour)
                         .atZone(zone)
                         .toInstant()
                         .toEpochMilli();
                 boolean solarYearly = event.yearly
                         && DateEvent.CALENDAR_SOLAR.equals(event.calendarType);
-                if (isDuplicate(resolver, target.id, event.title, start)) {
+                if (existing.contains(key) || isDuplicate(resolver, key, zone)) {
+                    existing.add(key);
                     result.duplicates++;
                     continue;
                 }
@@ -129,6 +137,7 @@ public final class CalendarExporter {
                     }
                 }
                 resolver.applyBatch(CalendarContract.AUTHORITY, operations);
+                existing.add(key);
                 result.added++;
                 if (event.yearly && DateEvent.CALENDAR_LUNAR.equals(event.calendarType)) {
                     result.recurringLunar++;
@@ -142,29 +151,52 @@ public final class CalendarExporter {
 
     private static boolean isDuplicate(
             ContentResolver resolver,
-            long calendarId,
-            String title,
-            long start
+            CalendarEventKey key,
+            ZoneId zone
     ) {
-        String[] projection = {CalendarContract.Events._ID};
-        String selection = CalendarContract.Events.CALENDAR_ID + "=? AND "
-                + CalendarContract.Events.TITLE + "=? AND "
-                + CalendarContract.Events.DTSTART + "=? AND "
-                + CalendarContract.Events.DELETED + "=0";
-        String[] args = {String.valueOf(calendarId), title, String.valueOf(start)};
+        String[] projection = {
+                CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.ALL_DAY
+        };
+        String selection = CalendarContract.Instances.CALENDAR_ID + "=? AND "
+                + CalendarContract.Instances.TITLE + "=? AND "
+                + CalendarContract.Events.DELETED + "=0 AND ("
+                + CalendarContract.Instances.STATUS + " IS NULL OR "
+                + CalendarContract.Instances.STATUS + "!=?)";
+        String[] args = {
+                String.valueOf(key.calendarId), key.title,
+                String.valueOf(CalendarContract.Instances.STATUS_CANCELED)
+        };
+        // Instances expands recurrence rules, so an annual event created in a previous
+        // year is still found. Include both local and UTC days for all-day events.
+        Uri.Builder uri = CalendarContract.Instances.CONTENT_URI.buildUpon();
+        ContentUris.appendId(uri, key.queryBegin(zone));
+        ContentUris.appendId(uri, key.queryEnd(zone));
         try (Cursor cursor = resolver.query(
-                CalendarContract.Events.CONTENT_URI,
+                uri.build(),
                 projection,
                 selection,
                 args,
                 null
         )) {
-            return cursor != null && cursor.moveToFirst();
+            if (cursor == null) {
+                // An unavailable provider must never be treated as an empty calendar.
+                throw new IllegalStateException("无法检查日历中的已有日程");
+            }
+            while (cursor.moveToNext()) {
+                CalendarEventKey candidate = CalendarEventKey.fromInstance(
+                        key.calendarId, key.title, cursor.getLong(0), cursor.getInt(1) != 0, zone
+                );
+                if (key.equals(candidate)) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 
     private static String description(DateEvent event, Occurrence occurrence) {
-        StringBuilder text = new StringBuilder("由念日批量添加\n")
+        StringBuilder text = new StringBuilder("由念日同步到本机日历\n")
                 .append(occurrence.primaryDate)
                 .append(" · ")
                 .append(occurrence.secondaryDate);
